@@ -1,0 +1,103 @@
+﻿@page "/search/{SearchTerm}"
+@inject IMediator Mediator
+
+<PageTitle>Search Trails - Blazing Trails</PageTitle>
+
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/">Home</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Search</li>
+    </ol>
+</nav>
+
+<h3 class="mt-5 mb-4">Search results for "@SearchTerm"</h3>
+
+<SearchFilter SearchTerm="@SearchTerm" MaxLength="MaxLength" MaxTime="MaxTime" />
+
+@if (_searchResults == null)
+{
+    <p>Loading search results...</p>
+}
+else
+{
+    <TrailDetails Trail="_selectedTrail" />
+
+    <div class="grid">
+
+        @foreach (var trail in _searchResults)
+        {
+            <TrailCard Trail="trail" OnSelected="HandleTrailSelected" />
+        }
+
+    </div>
+}
+
+@code {
+    private IEnumerable<Trail>? _searchResults;
+    private IEnumerable<Trail> _cachedSearchResults = Array.Empty<Trail>();
+    private Trail? _selectedTrail;
+
+    [Parameter] public required string SearchTerm { get; set; }
+    [Parameter, SupplyParameterFromQuery] public int? MaxLength { get; set; }
+    [Parameter, SupplyParameterFromQuery] public int? MaxTime { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var response = await Mediator.Send(new GetTrailsRequest());
+            var allTrails = response.Trails.Select(x => new Trail
+            {
+                Id = x.Id,
+                Name = x.Name,
+                Image = x.Image,
+                Description = x.Description,
+                Location = x.Location,
+                Length = x.Length,
+                TimeInMinutes = x.TimeInMinutes,
+                Owner = x.Owner,
+                Waypoints = x.Waypoints.Select(wp => new BlazingTrails.ComponentLibrary.Map.LatLong(wp.Latitude, wp.Longitude))?.ToList() ?? new List<ComponentLibrary.Map.LatLong>()
+            });
+
+            _searchResults = allTrails.Where(x => x.Name.Contains(SearchTerm, StringComparison.CurrentCultureIgnoreCase)
+                                           || x.Location.Contains(SearchTerm, StringComparison.CurrentCultureIgnoreCase));
+            _cachedSearchResults = _searchResults;
+
+            UpdateFilters();
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.WriteLine($"There was a problem loading trail data: {ex.Message}");
+        }
+    }
+
+    protected override void OnParametersSet()
+        => UpdateFilters();
+
+    private void UpdateFilters()
+    {
+        var filters = new List<Func<Trail, bool>>();
+
+        if (MaxLength is not null && MaxLength > 0)
+        {
+            filters.Add(_ => _.Length <= MaxLength);
+        }
+
+        if (MaxTime is not null && MaxTime > 0)
+        {
+            filters.Add(_ => _.TimeInMinutes <= MaxTime * 60);
+        }
+
+        if (filters.Any())
+        {
+            _searchResults = _cachedSearchResults.Where(trail => filters.All(filter => filter(trail)));
+        }
+        else
+        {
+            _searchResults = _cachedSearchResults;
+        }
+    }
+
+    private void HandleTrailSelected(Trail trail)
+        => _selectedTrail = trail;
+}
